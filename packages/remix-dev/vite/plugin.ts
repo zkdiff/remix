@@ -140,6 +140,11 @@ export type VitePluginConfig = RemixEsbuildUserConfigJsdocOverrides &
      */
     adapter?: VitePluginAdapter;
     /**
+     * An optional basename to server your Remix app from (same as the React
+     * Router `basename` option).  Defaults to `/`.
+     */
+    basename?: string;
+    /**
      * The path to the server build directory, relative to the project. This
      * directory should be deployed to your server. Defaults to
      * `"build/server"`.
@@ -188,6 +193,7 @@ export type ResolvedVitePluginConfig = Pick<
   | "serverModuleFormat"
 > & {
   adapter?: Adapter;
+  basename: string;
   serverBuildDirectory: string;
   serverBuildFile: string;
   serverBundles?: ServerBundlesFunction;
@@ -477,6 +483,21 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
     let { serverBuildFile, unstable_serverBundles: serverBundles } =
       resolvedRemixUserConfig;
 
+    let basename = resolvedRemixUserConfig.basename || "/";
+    if (viteCommand === "serve" && !viteUserConfig.server?.middlewareMode) {
+      // Odd restriction for default vite dev server
+      // since Vite requires SSR request URL to be under `base` option (= `publicPath`)
+      if (!basename.startsWith(publicPath)) {
+        console.warn(
+          colors.yellow(
+            "The `basename` config must begin with `publicPath` for the default " +
+              "Vite dev server - the `basename` config will be ignored"
+          )
+        );
+        basename = "/";
+      }
+    }
+
     // Log warning for incompatible vite config flags
     if (isSpaMode && serverBundles) {
       console.warn(
@@ -506,6 +527,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
       adapter,
       appDirectory,
       assetsBuildDirectory,
+      basename,
       entryClientFilePath,
       entryServerFilePath,
       future,
@@ -545,6 +567,7 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
           remixConfig.assetsBuildDirectory
         )
       )};
+      export const basename = ${JSON.stringify(remixConfig.basename)};
       export const future = ${JSON.stringify(remixConfig.future)};
       export const isSpaMode = ${!remixConfig.ssr};
       export const publicPath = ${JSON.stringify(remixConfig.publicPath)};
@@ -656,10 +679,13 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
         path: route.path,
         index: route.index,
         caseSensitive: route.caseSensitive,
-        module: `${resolveFileUrl(
-          remixConfig,
-          resolveRelativeRouteFilePath(route, remixConfig)
-        )}${CLIENT_ROUTE_QUERY_STRING}`,
+        module: path.posix.join(
+          remixConfig.publicPath,
+          `${resolveFileUrl(
+            remixConfig,
+            resolveRelativeRouteFilePath(route, remixConfig)
+          )}${CLIENT_ROUTE_QUERY_STRING}`
+        ),
         hasAction: sourceExports.includes("action"),
         hasLoader: sourceExports.includes("loader"),
         hasClientAction: sourceExports.includes("clientAction"),
@@ -671,12 +697,21 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
 
     return {
       version: String(Math.random()),
-      url: VirtualModule.url(browserManifestId),
+      url: path.posix.join(
+        remixConfig.publicPath,
+        VirtualModule.url(browserManifestId)
+      ),
       hmr: {
-        runtime: VirtualModule.url(injectHmrRuntimeId),
+        runtime: path.posix.join(
+          remixConfig.publicPath,
+          VirtualModule.url(injectHmrRuntimeId)
+        ),
       },
       entry: {
-        module: resolveFileUrl(remixConfig, remixConfig.entryClientFilePath),
+        module: path.posix.join(
+          remixConfig.publicPath,
+          resolveFileUrl(remixConfig, remixConfig.entryClientFilePath)
+        ),
         imports: [],
       },
       routes,
@@ -759,8 +794,8 @@ export const remixVitePlugin: RemixVitePlugin = (remixUserConfig = {}) => {
               "@remix-run/react",
             ],
           },
+          base: remixConfig.publicPath,
           ...(viteCommand === "build" && {
-            base: remixConfig.publicPath,
             build: {
               ...viteUserConfig.build,
               ...(!isSsrBuild
@@ -1535,16 +1570,21 @@ async function getRouteMetadata(
     path: route.path,
     index: route.index,
     caseSensitive: route.caseSensitive,
-    url:
+    url: path.posix.join(
+      pluginConfig.publicPath,
       "/" +
-      path.relative(
-        pluginConfig.rootDirectory,
+        path.relative(
+          pluginConfig.rootDirectory,
+          resolveRelativeRouteFilePath(route, pluginConfig)
+        )
+    ),
+    module: path.posix.join(
+      pluginConfig.publicPath,
+      `${resolveFileUrl(
+        pluginConfig,
         resolveRelativeRouteFilePath(route, pluginConfig)
-      ),
-    module: `${resolveFileUrl(
-      pluginConfig,
-      resolveRelativeRouteFilePath(route, pluginConfig)
-    )}?import`, // Ensure the Vite dev server responds with a JS module
+      )}?import` // Ensure the Vite dev server responds with a JS module
+    ),
     hasAction: sourceExports.includes("action"),
     hasClientAction: sourceExports.includes("clientAction"),
     hasLoader: sourceExports.includes("loader"),

@@ -24,6 +24,7 @@ import {
 declare global {
   var __remixContext: {
     url: string;
+    basename: string;
     state: HydrationState;
     criticalCss?: string;
     future: FutureConfig;
@@ -270,6 +271,7 @@ export function RemixBrowser(_props: RemixBrowserProps): ReactElement {
     // over initialization to support synchronous `clientLoader` flows.
     router = createRouter({
       routes,
+      basename: window.__remixContext.basename,
       history: createBrowserHistory(),
       future: {
         v7_normalizeFormMethod: true,
